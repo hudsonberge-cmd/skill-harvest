@@ -1,15 +1,32 @@
 # skill-harvest
 
-A [Claude Code](https://claude.com/claude-code) skill that turns what Claude learns while you work into reusable skills.
+A [Claude Code](https://claude.com/claude-code) skill that turns what Claude learns while you work into reusable skills, so it stops relearning the same lessons every session.
 
-At the end of a session, or whenever you ask, it scans the conversation for workflows that eventually worked, gotchas that cost time, tool/API quirks, and your corrections. Then it sorts each one:
+## What it does
 
-- **NEW**: a repeatable procedure becomes a new skill in `~/.claude/skills/<name>/SKILL.md`
-- **UPD**: a fix for an existing skill gets added to that skill
-- **MEM**: a preference or fact goes to memory, not a skill
-- **DROP**: anything too thin to keep
+| Mode | Say | What happens |
+|---|---|---|
+| **now** | `/skill-harvest`, "harvest", "make a skill out of this" | Pulls workflows, gotchas, tool quirks and your corrections from the current session |
+| **queue** | "harvest queue" | Reviews past sessions the auto-hook flagged as worth harvesting |
+| **backfill** | "mine my history" | Finds commands and errors that recur across past sessions with **no skill covering them** |
+| **audit** | "audit my skills" | Lints every installed skill: weak trigger descriptions, dead paths, leaked secrets, overlaps, and skills you never use |
 
-It shows you the list and asks before writing anything. Every harvest, including rejected ones, is logged in `LEDGER.md` so nothing gets pitched twice.
+Each finding is labeled **NEW** skill / **UPD**ate an existing skill / **MEM**ory / **DROP**, shown to you with evidence, and only written after you approve. New skills get linted, and every harvest (rejected ones too) is logged in `LEDGER.md` so nothing gets pitched twice.
+
+## The tools behind it
+
+Stdlib Python 3. They read your local transcripts in `~/.claude/projects/` and make **no LLM calls and no network calls**.
+
+```sh
+H=~/.claude/skills/skill-harvest/scripts
+python3 $H/mine.py session latest      # one session: prompts, corrections, errors → what was tried next
+python3 $H/mine.py backfill --days 30  # cross-session patterns; ✗ = no skill covers it
+python3 $H/mine.py usage --days 30     # how often each skill actually gets used
+python3 $H/mine.py queue               # sessions flagged by the hook
+python3 $H/lint.py                     # audit all installed skills
+```
+
+Headless `claude -p` / SDK sessions are skipped by default (`--all` includes them).
 
 ## Install
 
@@ -18,7 +35,18 @@ git clone https://github.com/hudsonberge-cmd/skill-harvest.git /tmp/skill-harves
 cp -r /tmp/skill-harvest/skill-harvest ~/.claude/skills/
 ```
 
-## Use
+### Optional: auto-queue hooks
 
-- `/skill-harvest`, "harvest", or "make a skill out of this" (the last one skips the approval step)
-- Proactive: after a substantial task, Claude adds one line offering to turn the learnings into a skill. For this to happen reliably across sessions, add a note to your `CLAUDE.md` or memory telling Claude to run the skill-harvest check after big tasks.
+```sh
+python3 ~/.claude/skills/skill-harvest/scripts/install_hooks.py          # --remove to undo
+```
+
+This adds two hooks to `~/.claude/settings.json` (backed up first, existing hooks kept):
+- **SessionEnd** scores the finished session in ~0.1s (errors that got retried, your corrections, session length) and queues it if it looks worth harvesting.
+- **SessionStart** adds a one-line note when the queue isn't empty, so Claude can offer to harvest.
+
+### Optional: proactive offers
+
+Add this to your `CLAUDE.md` so Claude offers to harvest at the end of big tasks:
+
+> After substantial multi-step tasks, run the /skill-harvest check and, if there's a solid candidate, end with one line: "Harvestable: <name> — want me to skill it?"
